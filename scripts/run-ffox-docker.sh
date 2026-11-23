@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-which docker > /dev/null 2>&1 || { echo "docker is not installed, install w/ brew install docker (macOS)" >&2; exit 1; }
+which dockerd > /dev/null 2>&1 || { echo "docker is not installed, install docker desktop w/ brew install --cask docker (macOS)" >&2; exit 1; }
 which uv > /dev/null 2>&1 || { echo "uv is not installed, run \`curl -LsSf https://astral.sh/uv/install.sh | sh\` to install" >&2; exit 1; }
 
 # Start jlesage/firefox with WebDriver BiDi exposed on host :9222, then navigate.
@@ -16,6 +16,9 @@ PORT=5770  # change to your allowlist
 # 2. remove any existing firefox container
 cid=$(docker ps -aq --filter "name=^/firefox$") && [ -n "$cid" ] && docker rm -f "$cid"
 
+# 2.1. create the directory if it doesn't exist
+mkdir -p ~/docker/appdata/firefox   
+
 # 3. run the firefox container (BiDi on 127.0.0.1:9222 inside → socat 9223 → host 9222)
 docker run -d \
     --name=firefox \
@@ -24,7 +27,7 @@ docker run -d \
     -e KEEP_APP_RUNNING=1 \
     -e INSTALL_PACKAGES=socat \
     -e FF_CUSTOM_ARGS="--remote-debugging-port=9222 --remote-allow-hosts=* --remote-allow-origins=*" \
-    -v /docker/appdata/firefox:/config:rw \
+    -v ~/docker/appdata/firefox:/config:rw \
     jlesage/firefox
 
 # Wait briefly for Firefox + package install, then publish BiDi
