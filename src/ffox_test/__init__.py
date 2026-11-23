@@ -181,10 +181,15 @@ def evaluate(expression: str, **kwargs: Any) -> Any:
 async def run(args: Namespace) -> None:
     async with FirefoxSession() as ff:
         await ff.navigate("https://airtable.com/login", ready='input[type="email"], input[name="email"]')
+        print("navigated to airtable login page")
         await ff.fill('input[type="email"], input[name="email"]', "devops@gordian.bio")
+        print("filled email")
         await ff.click("#sign-in-form-fields-root button[type=submit]")  # Continue
+        print("clicked continue")
         await ff.wait_for_selector('input[type="password"]', timeout=60)
+        print("waited for password input")
         await ff.fill('input[type="password"]', "test123")
+        print("filled password")
         # await ff.click('button[type=submit]')  # tighten once you see Sign in markup
         # then poll current_url until "login" not in it
 
@@ -200,6 +205,3 @@ def main() -> None:
     args = parser.parse_args()
     
     asyncio.run(run(args))
-    
-    opened = navigate(args.url, vnc_host=args.vnc_host, vnc_port=args.vnc_port)
-    print(f"navigated to {opened}")
