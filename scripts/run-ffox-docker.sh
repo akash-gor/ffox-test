@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-which dockerd > /dev/null 2>&1 || { echo "docker is not installed, install docker desktop w/ brew install --cask docker (macOS)" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "docker is not installed, install docker desktop w/ brew install --cask docker (macOS)" >&2; exit 1; }
 which uv > /dev/null 2>&1 || { echo "uv is not installed, run \`curl -LsSf https://astral.sh/uv/install.sh | sh\` to install" >&2; exit 1; }
 
 # Start jlesage/firefox with WebDriver BiDi exposed on host :9222, then navigate.
