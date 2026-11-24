@@ -1,8 +1,10 @@
 """Control jlesage/firefox: RFB for chrome, BiDi for page DOM."""
 
 from __future__ import annotations
+import os
 from argparse import Namespace
 import asyncio
+from dotenv import load_dotenv
 
 from typing import Any, Optional
 
@@ -179,18 +181,24 @@ def evaluate(expression: str, **kwargs: Any) -> Any:
 
 
 async def run(args: Namespace) -> None:
+    load_dotenv()
+    
     async with FirefoxSession() as ff:
-        await ff.navigate("https://airtable.com/login", ready='input[type="email"], input[name="email"]')
-        print("navigated to airtable login page")
-        await ff.fill('input[type="email"], input[name="email"]', "devops@gordian.bio")
+        await ff.navigate("https://airtable.com", ready='a[href*="login"]')
+        print("navigated to airtable home page")
+        # Scope to the desktop navbar: a plain a[href*="login"] matches a hidden
+        # mobile-menu link first, which BiDi refuses to click.
+        await ff.click('[class*="ActionGroup-module_actionGroupWrap"] a[href*="login"]')
+        print("clicked login link")
+        await ff.fill('input[type="email"], input[name="email"]', os.getenv("READONLY_AIRTABLE_EMAIL") or "devops@gordian.bio")
         print("filled email")
         await ff.click("#sign-in-form-fields-root button[type=submit]")  # Continue
         print("clicked continue")
         await ff.wait_for_selector('input[type="password"]', timeout=60)
         print("waited for password input")
-        await ff.fill('input[type="password"]', "test123")
+        await ff.fill('input[type="password"]', os.getenv("READONLY_AIRTABLE_PWD") or "")
         print("filled password")
-        # await ff.click('button[type=submit]')  # tighten once you see Sign in markup
+        await ff.click('button[type=submit]')  # tighten once you see Sign in markup
         # then poll current_url until "login" not in it
 
 def main() -> None:

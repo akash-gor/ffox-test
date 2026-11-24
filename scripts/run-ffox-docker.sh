@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
-docker info >/dev/null 2>&1 || { echo "docker is not installed, install docker desktop w/ brew install --cask docker (macOS)" >&2; exit 1; }
+which docker > /dev/null 2>&1 || which /
+
+docker info >/dev/null 2>&1 || { 
+    echo "docker is not installed, install docker desktop w/ one of the following:"
+    echo "     MacOS CLI: brew install --cask docker (macOS)"
+    echo "     MacOS GUI: https://docs.docker.com/desktop/setup/install/mac-install/"
+}
 which uv > /dev/null 2>&1 || { echo "uv is not installed, run \`curl -LsSf https://astral.sh/uv/install.sh | sh\` to install" >&2; exit 1; }
 
 # Start jlesage/firefox with WebDriver BiDi exposed on host :9222, then navigate.
