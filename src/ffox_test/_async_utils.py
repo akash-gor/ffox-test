@@ -5,12 +5,9 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 from collections.abc import Coroutine
-from typing import TypeVar
-
-T = TypeVar("T")
 
 
-def run_sync(coro: Coroutine[object, object, T]) -> T:
+def run_sync[T](coro: Coroutine[object, object, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -18,4 +15,6 @@ def run_sync(coro: Coroutine[object, object, T]) -> T:
 
     # Jupyter / already-running loop: execute in a fresh loop on a worker thread.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        # The lambda (not ``pool.submit(asyncio.run, coro)``) lets type checkers
+        # see that the result is ``T``.
+        return pool.submit(lambda: asyncio.run(coro)).result()
