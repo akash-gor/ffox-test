@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from typing import Optional
+from typing import Self
 from urllib.parse import urlparse
 
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.protocol import State
+from websockets.typing import Subprotocol
 
 DEFAULT_VNC_HOST = "127.0.0.1"
 DEFAULT_VNC_PORT = 5770
@@ -41,16 +43,18 @@ def normalize_url(url: str) -> str:
 class RFBSession:
     """Drive Firefox chrome over noVNC (navigate via address bar, etc.)."""
 
-    def __init__(self, host: str = DEFAULT_VNC_HOST, port: int = DEFAULT_VNC_PORT) -> None:
+    def __init__(
+        self, host: str = DEFAULT_VNC_HOST, port: int = DEFAULT_VNC_PORT
+    ) -> None:
         self.host = host
         self.port = port
-        self._ws: Optional[ClientConnection] = None
+        self._ws: ClientConnection | None = None
 
     @property
     def uri(self) -> str:
         return f"ws://{self.host}:{self.port}/websockify"
 
-    async def __aenter__(self) -> "RFBSession":
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 
@@ -58,9 +62,17 @@ class RFBSession:
         await self.close()
 
     async def connect(self) -> None:
-        if self._ws is not None:
+        if self.connected:
             return
-        ws = await websockets.connect(self.uri, subprotocols=["binary"])
+        await self.close()  # drop a stale socket that has already closed
+        # ping_interval=None: noVNC's websockify never answers websocket pings, so the
+        # client's default keepalive would close this socket after ~40s of idleness
+        # (e.g. while BiDi does DOM work) with "keepalive ping timeout".
+        ws = await websockets.connect(
+            self.uri,
+            subprotocols=[Subprotocol("binary")],
+            ping_interval=None,
+        )
         try:
             await self._handshake(ws)
         except Exception:
@@ -70,7 +82,8 @@ class RFBSession:
 
     @property
     def connected(self) -> bool:
-        return self._ws is not None
+        """True only while the socket is actually open (not just once created)."""
+        return self._ws is not None and self._ws.state is State.OPEN
 
     async def close(self) -> None:
         if self._ws is not None:
@@ -79,7 +92,9 @@ class RFBSession:
 
     async def _handshake(self, ws: ClientConnection) -> None:
         version = await ws.recv()
-        if not isinstance(version, (bytes, bytearray)) or not version.startswith(b"RFB "):
+        if not isinstance(version, (bytes, bytearray)) or not version.startswith(
+            b"RFB "
+        ):
             raise RuntimeError(f"unexpected RFB version greeting: {version!r}")
         await ws.send(b"RFB 003.008\n")
 
@@ -89,11 +104,16 @@ class RFBSession:
         count = security[0]
         types = list(security[1 : 1 + count])
         if 1 not in types:
-            raise RuntimeError(f"server does not offer unauthenticated RFB (types={types})")
+            raise RuntimeError(
+                f"server does not offer unauthenticated RFB (types={types})"
+            )
         await ws.send(bytes([1]))
 
         result = await ws.recv()
-        if not isinstance(result, (bytes, bytearray)) or result[:4] != b"\x00\x00\x00\x00":
+        if (
+            not isinstance(result, (bytes, bytearray))
+            or result[:4] != b"\x00\x00\x00\x00"
+        ):
             raise RuntimeError(f"RFB security handshake failed: {result!r}")
 
         await ws.send(bytes([1]))
