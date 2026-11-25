@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-from typing import Any, Optional
+from typing import Any, Self
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -90,11 +90,11 @@ class BiDiSession:
         self.port = port
         self.container = container
         self.auto_proxy = auto_proxy
-        self._ws: Optional[ClientConnection] = None
+        self._ws: ClientConnection | None = None
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
-        self._reader_task: Optional[asyncio.Task[None]] = None
-        self.context: Optional[str] = None
+        self._reader_task: asyncio.Task[None] | None = None
+        self.context: str | None = None
 
     @property
     def uri(self) -> str:
@@ -102,9 +102,13 @@ class BiDiSession:
 
     @property
     def connected(self) -> bool:
+        # Deliberately "socket object exists", not "socket is open": if the socket drops
+        # without session.end, Firefox keeps the old session alive, so reconnecting
+        # fails with "Maximum number of active sessions". Better to surface the
+        # ConnectionClosed error than to hide it behind a reconnect that cannot work.
         return self._ws is not None
 
-    async def __aenter__(self) -> "BiDiSession":
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 
@@ -130,8 +134,8 @@ class BiDiSession:
         if self._ws is not None:
             try:
                 await self.call("session.end", {})
-            except Exception:
-                pass
+            except BiDiError, websockets.ConnectionClosed, TimeoutError, OSError:
+                pass  # best-effort: the browser may already have dropped the session
             await self._ws.close()
             self._ws = None
         if self._reader_task is not None:
@@ -150,7 +154,7 @@ class BiDiSession:
     async def _ensure_reachable(self) -> None:
         for attempt in range(3):
             try:
-                reader, writer = await asyncio.open_connection(self.host, self.port)
+                _reader, writer = await asyncio.open_connection(self.host, self.port)
                 writer.close()
                 await writer.wait_closed()
                 return
@@ -175,7 +179,7 @@ class BiDiSession:
         except websockets.ConnectionClosed:
             pass
 
-    async def call(self, method: str, params: Optional[dict[str, Any]] = None) -> Any:
+    async def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
         if self._ws is None:
             raise RuntimeError("BiDi session is not connected")
         msg_id = self._next_id
@@ -183,7 +187,9 @@ class BiDiSession:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending[msg_id] = fut
-        await self._ws.send(json.dumps({"id": msg_id, "method": method, "params": params or {}}))
+        await self._ws.send(
+            json.dumps({"id": msg_id, "method": method, "params": params or {}})
+        )
         try:
             msg = await asyncio.wait_for(fut, timeout=60)
         except Exception:
@@ -212,7 +218,7 @@ class BiDiSession:
         selector: str,
         *,
         locator_type: str = "css",
-        max_count: Optional[int] = None,
+        max_count: int | None = None,
     ) -> list[dict[str, Any]]:
         params: dict[str, Any] = {
             "context": self._require_context(),
@@ -235,7 +241,9 @@ class BiDiSession:
         last_error: Exception | None = None
         while asyncio.get_running_loop().time() < deadline:
             try:
-                nodes = await self.locate(selector, locator_type=locator_type, max_count=1)
+                nodes = await self.locate(
+                    selector, locator_type=locator_type, max_count=1
+                )
                 if nodes:
                     return nodes[0]
             except BiDiError as exc:
@@ -306,7 +314,7 @@ class BiDiSession:
             },
         )
 
-    async def type_text(self, text: str, *, selector: Optional[str] = None) -> None:
+    async def type_text(self, text: str, *, selector: str | None = None) -> None:
         """Send key events, optionally focusing ``selector`` first."""
         if selector:
             await self.click(selector)
@@ -345,3 +353,34 @@ class BiDiSession:
 
     async def current_url(self) -> str:
         return str(await self.evaluate("location.href", await_promise=False))
+
+    async def get_cookies(
+        self,
+        *,
+        domain: str | None = None,
+        name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return browser cookies, including HttpOnly ones, sorted by domain then name.
+
+        Covers every site in the browser profile, not just the current page.
+        ``domain`` / ``name`` are exact-match filters (``domain=".airtable.com"``).
+        Each cookie is returned once; the DevTools Storage Inspector may list a
+        ``.example.com`` cookie under several hosts, BiDi does not.
+        """
+        flt = {
+            key: value
+            for key, value in (("domain", domain), ("name", name))
+            if value is not None
+        }
+        result = await self.call("storage.getCookies", {"filter": flt} if flt else {})
+        cookies = []
+        for raw in result.get("cookies") or []:
+            cookie = dict(raw)
+            value = cookie.get("value")
+            if isinstance(value, dict) and value.get("type") == "string":
+                cookie["value"] = value[
+                    "value"
+                ]  # unwrap {"type": "string", "value": ...}
+            cookies.append(cookie)
+        cookies.sort(key=lambda c: (c["domain"], c["name"]))
+        return cookies
